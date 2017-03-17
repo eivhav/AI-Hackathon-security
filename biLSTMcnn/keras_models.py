@@ -49,23 +49,29 @@ class ConvolutionalLSTM():
         dense_output = Dense(input_dim=1000, output_dim=1, name='final_output')(doc_end_pooling)
 
         self.model = Model(input=doc_input, output=dense_output, name='lstm_cnn_model')
-        self.model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        self.model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 
         print(self.model.summary())
 
 
 
 file_path_pos = "/home/havikbot/Downloads/pos_distinct.txt"
-file_path_neg = ""
+file_path_neg = "/home/havikbot/Downloads/neg_distinct.txt"
 
 
 data_pos = codecs.open(file_path_pos, "r", "utf-8").readlines()
-#data_neg = open(file_path_neg).readlines()
+data_neg = codecs.open(file_path_neg, "r", "utf-8").readlines()
+
+all_data = [[p, 1] for p in data_pos] + [[n, 0] for n in data_neg]
+from random import shuffle
+shuffle(all_data)
+text_data = [x[0] for x in all_data]
+labels = [x[1] for x in all_data]
 
 tokenize = lambda x: simple_preprocess(x)
 
 
-def create_embeddings(data_dir, file_path,  embeddings_path='embeddings.npz', vocab_path='map.json', **params):
+def create_embeddings(data_dir, text_data, embeddings_path='embeddings.npz', vocab_path='map.json', **params):
     """
     Generate embeddings from a batch of text
     :param embeddings_path: where to save the embeddings
@@ -73,17 +79,17 @@ def create_embeddings(data_dir, file_path,  embeddings_path='embeddings.npz', vo
     """
 
     class SentenceGenerator(object):
-        def __init__(self, data_dir, file_path):
-            self.file_path = data_dir+file_path
+        def __init__(self, data_dir, text_data):
+            self.text_data = text_data
 
         def __iter__(self):
-            lines = codecs.open(self.file_path, "r", "utf-8").readlines()
-            for line in lines:
+            #lines = codecs.open(self.file_path, "r", "utf-8").readlines()
+            for line in text_data:
                 yield tokenize(line)
 
-    sentences = SentenceGenerator(data_dir, file_path)
+    sentences = SentenceGenerator(data_dir, text_data)
 
-    model = Word2Vec(sentences, **params)
+    model = Word2Vec(sentences, workers=10, size=300, min_count=3)
     weights = model.syn0
     np.save(open(data_dir+embeddings_path, 'wb'), weights)
 
@@ -111,28 +117,29 @@ if __name__ == '__main__':
     data_path = '/home/havikbot/Downloads/'
 
     # variable arguments are passed to gensim's word2vec model
-    create_embeddings(data_path, 'pos_distinct.txt', size=100, min_count=5, window=5, sg=1, iter=25)
+    create_embeddings(data_path, text_data, size=300, min_count=3, window=10, sg=1, iter=100)
 
     word2idx, idx2word = load_vocab()
 
-    config = {'doc_len': 50,
+    config = {'doc_len': 200,
               'initial_embed_weights': '/home/havikbot/Downloads/embeddings.npz',
-              'n_words': 1999}
+              'n_words': 3680}
 
     model_class = ConvolutionalLSTM()
     model_class.build_and_compile(config)
 
 
-    train_pos_data = np.zeros((len(data_pos), 50), dtype=np.float32)
-    for l in range(len(data_pos)):
-        new_line1 = tokenize(data_pos[l])
+    train_data = np.zeros((len(text_data), 200), dtype=np.float32)
+    for l in range(len(text_data)):
+        new_line1 = tokenize(text_data[l])
         for i in range(len(new_line1)):
             try:
-                train_pos_data[l][i] = word2idx[new_line1[i]]
+                train_data[l][i] = word2idx[new_line1[i]]
             except:
                 continue
 
-    y_pred = np.random.rand(3014)
 
-    output = model_class.model.fit(train_pos_data[0:100], y_pred[0:100], nb_epoch=20, batch_size=4, verbose=0, validation_split=0.2)
-    print(output)
+    y_pred = np.array(labels).reshape(len(labels), 1)
+
+    model_class.model.fit(train_data, y_pred, nb_epoch=20, batch_size=256, verbose=1, validation_split=0.2)
+
