@@ -1,5 +1,5 @@
 
-
+from keras import embedding
 
 
 class ConvolutionalLSTM(LanguageModel):
