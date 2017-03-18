@@ -15,6 +15,7 @@ import codecs
 
 
 
+
 class ConvolutionalLSTM():
     def __init__(self):
         self.model = None
@@ -36,7 +37,7 @@ class ConvolutionalLSTM():
 
         # cnn
         cnns = [Convolution1D(filter_length=filter_length,
-                              nb_filter=500,
+                              nb_filter=300,
                               activation='tanh',
                               border_mode='same') for filter_length in [1, 2, 3, 5]]
 
@@ -46,17 +47,21 @@ class ConvolutionalLSTM():
         maxpool.supports_masking = True
         doc_end_pooling = maxpool(doc_cnn)
 
-        dense_output = Dense(input_dim=1000, output_dim=1, name='final_output')(doc_end_pooling)
+        dense_output = Dense(input_dim=1000, activation='sigmoid', output_dim=1, name='final_output', )(doc_end_pooling)
 
         self.model = Model(input=doc_input, output=dense_output, name='lstm_cnn_model')
-        self.model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+        def my_binary_crossentropy(y_true, y_pred):
+            return K.mean(K.binary_crossentropy(y_pred, y_true), axis=-1)
+
+        self.model.compile(loss='mean_squared_error', optimizer='adam')
 
         print(self.model.summary())
 
 
 
-file_path_pos = "/home/havikbot/Downloads/pos_distinct.txt"
-file_path_neg = "/home/havikbot/Downloads/neg_distinct.txt"
+file_path_pos = "/home/havikbot/Downloads/full_coments_pos.txt"
+file_path_neg = "/home/havikbot/Downloads/full_coments_neg.txt"
 
 
 data_pos = codecs.open(file_path_pos, "r", "utf-8").readlines()
@@ -117,29 +122,77 @@ if __name__ == '__main__':
     data_path = '/home/havikbot/Downloads/'
 
     # variable arguments are passed to gensim's word2vec model
-    create_embeddings(data_path, text_data, size=300, min_count=3, window=10, sg=1, iter=100)
+    create_embeddings(data_path, text_data, size=300, min_count=2, window=10, sg=1, iter=100)
 
     word2idx, idx2word = load_vocab()
 
-    config = {'doc_len': 200,
+    config = {'doc_len': 250,
               'initial_embed_weights': '/home/havikbot/Downloads/embeddings.npz',
-              'n_words': 3680}
+              'n_words': 19040}
 
     model_class = ConvolutionalLSTM()
     model_class.build_and_compile(config)
 
 
-    train_data = np.zeros((len(text_data), 200), dtype=np.float32)
+
+    data = np.zeros((len(text_data), 250), dtype=np.float32)
     for l in range(len(text_data)):
         new_line1 = tokenize(text_data[l])
         for i in range(len(new_line1)):
             try:
-                train_data[l][i] = word2idx[new_line1[i]]
+                data[l][i] = word2idx[new_line1[i]]
             except:
                 continue
 
-
     y_pred = np.array(labels).reshape(len(labels), 1)
 
-    model_class.model.fit(train_data, y_pred, nb_epoch=20, batch_size=256, verbose=1, validation_split=0.2)
+    train_data = data[0:int(len(data)*0.9)]
+    test_data = data[int(len(data) * 0.9):]
+
+
+    #model_class.model.fit(train_data, y_pred[0:int(len(data)*0.9)], nb_epoch=15, batch_size=64, verbose=1, validation_split=0.2)
+    #model_class.model.save_weights("300model.h5")
+    model_class.model.load_weights("300model.h5")
+    rel_docs = []
+    re_docs_txt = []
+
+    for i in range(0, 100):
+        txt_index = int(len(data) * 0.9) + i
+
+        prediction = model_class.model.predict(test_data[i].reshape(1, 250))
+        pred = "Relevant"
+        if prediction[0][0] <= 0.5: pred = "Not Relevant"
+        line = ""
+        for s in tokenize(text_data[txt_index]): line = line + " " +s
+        print(pred, '\t', line)
+
+        if pred == "Relevant" :
+            rel_docs.append(line.split(" "))
+
+    from  gensim.models import LdaModel
+    from gensim import corpora
+    dictionary = corpora.Dictionary(rel_docs)
+    corpus = [dictionary.doc2bow(text) for text in rel_docs]
+
+    ldamodel = LdaModel(corpus, num_topics=50, id2word=dictionary, passes=20)
+    for i in range(len(rel_docs)):
+        print(ldamodel[dictionary.doc2bow(rel_docs[i])])
+        print()
+
+    for i in range(len(rel_docs)):
+
+        print(rel_docs)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
